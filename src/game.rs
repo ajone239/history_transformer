@@ -2,11 +2,11 @@ use crate::outcome::Outcome;
 
 #[derive(Debug, Default)]
 pub struct Game {
-    outcome: Outcome,
-    white_elo: Option<usize>,
-    black_elo: Option<usize>,
-    moves: Vec<String>,
-    event: Option<String>,
+    pub outcome: Outcome,
+    pub white_elo: Option<usize>,
+    pub black_elo: Option<usize>,
+    pub moves: Vec<String>,
+    pub event: Option<String>,
 }
 
 impl Game {
