@@ -1,16 +1,43 @@
 use std::collections::HashMap;
-use std::io::prelude::*;
+use std::io::{prelude::*, stdout, BufWriter};
 
-use std::sync::{Arc, Mutex};
-use std::{error::Error, fs::File, io::BufReader, sync::mpsc, thread};
+use std::{
+    error::Error,
+    fs::File,
+    io::BufReader,
+    path::PathBuf,
+    sync::mpsc,
+    sync::{Arc, Mutex},
+    thread,
+};
 
 use history_transformer::{game::Game, outcome::Outcome, states::States};
 
 use chess::{Board, ChessMove};
 
-const WORKER_COUNT: usize = 4;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Input File
+    #[arg(short, long)]
+    in_file: PathBuf,
+
+    /// Output File
+    #[arg(short, long)]
+    out_file: Option<PathBuf>,
+
+    /// Number of threads to spin up
+    #[arg(short, long)]
+    worker_count: Option<usize>,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+
+    let worker_count = cli.worker_count.unwrap_or(1);
+
     let (tx, rx) = mpsc::channel::<Vec<String>>();
 
     let rx = Arc::new(Mutex::new(rx));
@@ -18,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut handles = vec![];
     let mut standings = vec![];
 
-    for i in 0..WORKER_COUNT {
+    for i in 0..worker_count {
         let position_wld = Arc::new(Mutex::new(HashMap::new()));
 
         let handle = thread::spawn({
@@ -35,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut state = States::Event;
 
     // Read in the data and send it to the workers
-    let f = File::open("data/for_austin.txt")?;
+    let f = File::open(cli.in_file)?;
     let lines = BufReader::new(f).lines();
     for line in lines {
         let line = line?;
@@ -82,11 +109,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         position_wld
     };
 
+    let mut fout: Box<dyn Write> = match cli.out_file {
+        Some(path) => {
+            let fout = File::open(path)?;
+            Box::new(BufWriter::new(fout))
+        }
+        None => Box::new(BufWriter::new(stdout())),
+    };
     // Print
     for (k, v) in final_standings.iter() {
         let key_str = k.to_string();
         let key_str: String = key_str.split(' ').take(1).collect();
-        println!("{key_str}: {v:?}");
+        fout.write_fmt(format_args!("{key_str}: {v:?}\n"))?;
     }
 
     Ok(())
@@ -97,7 +131,10 @@ type LockedChannel = Arc<Mutex<mpsc::Receiver<Data>>>;
 type LockedResult = Arc<Mutex<HashMap<Board, [i32; 3]>>>;
 
 fn game_data_handler(_id: usize, rx: LockedChannel, position_wld: LockedResult) {
+    // Hold the lock the whole time
+    // Yeah its yucky but it get's rust off our back
     let mut position_wld = position_wld.lock().unwrap();
+
     loop {
         let game_data = match rx.lock().unwrap().recv() {
             Ok(data) => data,
