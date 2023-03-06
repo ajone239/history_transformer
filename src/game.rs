@@ -24,7 +24,7 @@ impl Game {
         let black_elo = data[3].parse::<usize>().unwrap();
 
         // TODO(austin): Make this faster
-        let moves: Vec<String> = data[4].split(' ').map(|s| s.to_string()).collect();
+        let moves: Vec<String> = data[4].split(' ').map(|s| s.trim().to_string()).collect();
 
         Self {
             outcome,

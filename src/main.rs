@@ -111,13 +111,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut fout: Box<dyn Write> = match cli.out_file {
         Some(path) => {
-            let fout = File::open(path)?;
+            let fout = File::create(path)?;
             Box::new(BufWriter::new(fout))
         }
         None => Box::new(BufWriter::new(stdout())),
     };
     // Print
-    for (k, v) in final_standings.iter() {
+    for (k, v) in final_standings
+        .iter()
+        .filter(|(_, v)| v.iter().sum::<i32>() > 100)
+    {
         let key_str = k.to_string();
         let key_str: String = key_str.split(' ').take(1).collect();
         fout.write_fmt(format_args!("{key_str}: {v:?}\n"))?;
@@ -130,7 +133,7 @@ type Data = Vec<String>;
 type LockedChannel = Arc<Mutex<mpsc::Receiver<Data>>>;
 type LockedResult = Arc<Mutex<HashMap<Board, [i32; 3]>>>;
 
-fn game_data_handler(_id: usize, rx: LockedChannel, position_wld: LockedResult) {
+fn game_data_handler(id: usize, rx: LockedChannel, position_wld: LockedResult) {
     // Hold the lock the whole time
     // Yeah its yucky but it get's rust off our back
     let mut position_wld = position_wld.lock().unwrap();
@@ -145,7 +148,13 @@ fn game_data_handler(_id: usize, rx: LockedChannel, position_wld: LockedResult) 
         let mut board = Board::default();
 
         for m in game.moves {
-            let player_move = ChessMove::from_san(&board, &m).unwrap();
+            let player_move = match ChessMove::from_san(&board, &m) {
+                Ok(m) => m,
+                Err(err) => {
+                    // println!("Thread {id}: failed to parse {m}: {err}");
+                    continue;
+                }
+            };
 
             let new_board = board.make_move_new(player_move);
             board = new_board;
