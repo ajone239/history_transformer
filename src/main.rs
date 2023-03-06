@@ -1,38 +1,48 @@
 use std::io::prelude::*;
-use std::{
-    error::Error,
-    fs::File,
-    io::{BufReader, Lines},
-};
+
+use std::{error::Error, fs::File, io::BufReader, sync::mpsc, thread};
 
 // use chess::{Board, ChessMove};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let f = File::open("data/for_austin.txt")?;
-    let mut lines = BufReader::new(f).lines();
+    let lines = BufReader::new(f).lines();
 
-    let data = read_count_lines::<5>(&mut lines)?;
+    let (tx, rx) = mpsc::channel::<Vec<String>>();
 
-    let game = Game::new_from_str_vec(data);
+    let handle = thread::spawn(move || {
+        while let Ok(data) = rx.recv() {
+            let game = Game::new_from_str_vec(&data[..]);
 
-    println!("{game:#?}");
+            println!("{game:#?}");
+        }
+    });
+
+    let mut data = vec![];
+    let mut state = States::Event;
+
+    for line in lines {
+        let line = line?;
+        if &line[..2] == state.value() {
+            data.push(line[2..].to_string());
+            state = state.next();
+        } else {
+            data.clear();
+            state = States::Event;
+            continue;
+        }
+        if data.len() >= 5 {
+            tx.send(data.clone())?;
+            data.clear();
+            state = States::Event
+        }
+    }
+
+    drop(tx);
+
+    handle.join().unwrap();
 
     Ok(())
-}
-
-fn read_count_lines<const N: usize>(
-    lines: &mut Lines<BufReader<File>>,
-) -> Result<[String; N], std::io::Error> {
-    const EMPTY_STRING: String = String::new();
-
-    let mut data = [EMPTY_STRING; N];
-
-    for d in data.iter_mut() {
-        // TODO(austin): Handle this unwrap
-        let line = lines.next().unwrap()?;
-        *d = line;
-    }
-    Ok(data)
 }
 
 #[derive(Debug, Default)]
@@ -53,35 +63,74 @@ impl Outcome {
     }
 }
 
+// order of data
+//
+// event
+// outcome
+// White
+// Black
+// moves
+enum States {
+    Event,
+    Outcome,
+    WhiteElo,
+    BlackElo,
+    LeMoves,
+}
+
+impl States {
+    fn value(&self) -> &str {
+        match self {
+            Self::Event => "E,",
+            Self::Outcome => "O,",
+            Self::WhiteElo => "W,",
+            Self::BlackElo => "B,",
+            Self::LeMoves => "L,",
+        }
+    }
+    fn next(&self) -> Self {
+        match self {
+            Self::Event => Self::Outcome,
+            Self::Outcome => Self::WhiteElo,
+            Self::WhiteElo => Self::BlackElo,
+            Self::BlackElo => Self::LeMoves,
+            Self::LeMoves => Self::Event,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Game {
     outcome: Outcome,
-    white_elo: usize,
-    black_elo: usize,
+    white_elo: Option<usize>,
+    black_elo: Option<usize>,
     moves: Vec<String>,
-    event: String,
+    event: Option<String>,
 }
 
 impl Game {
-    fn new_from_str_vec(data: [String; 5]) -> Self {
-        let outcome = Outcome::new_from_str(&data[0]);
+    fn new() -> Self {
+        unimplemented!()
+    }
+    fn new_from_str_vec(data: &[String]) -> Self {
+        // TODO(austin): Take this out if slow
+        let event = data[0].to_string();
+
+        let outcome = Outcome::new_from_str(&data[1]);
 
         // TODO(austin): Take this out if slow
-        let white_elo = data[1][2..].parse::<usize>().unwrap();
-        let black_elo = data[2][2..].parse::<usize>().unwrap();
+        let white_elo = data[2].parse::<usize>().unwrap();
+        let black_elo = data[3].parse::<usize>().unwrap();
 
         // TODO(austin): Make this faster
-        let moves: Vec<String> = data[3][2..].split(' ').map(|s| s.to_string()).collect();
-
-        // TODO(austin): Take this out if slow
-        let event = data[4][2..].to_string();
+        let moves: Vec<String> = data[4].split(' ').map(|s| s.to_string()).collect();
 
         Self {
             outcome,
-            white_elo,
-            black_elo,
+            white_elo: Some(white_elo),
+            black_elo: Some(black_elo),
             moves,
-            event,
+            event: Some(event),
         }
     }
 }
